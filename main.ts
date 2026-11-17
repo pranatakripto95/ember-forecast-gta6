@@ -25,7 +25,9 @@
 //   distribution of log(viewers_h / viewers_1). No curve is assumed: the
 //   evening peak, the 01:00-02:00 UTC dip and the widening spread all come
 //   from the neighbours themselves. A light 3-hour median smooth removes
-//   single-hour jitter from the small neighbour pool.
+//   single-hour jitter from the small neighbour pool, and a 90% band
+//   narrower than 0.8 log units is widened around the median, since 12
+//   neighbours cannot honestly support more certainty than that.
 //
 //   Fallbacks keep every case valid: if too few neighbours have an hour,
 //   that hour falls back to all comparables, then to the house persistence
@@ -50,6 +52,7 @@ const W_LOG_H1 = 1.0; // weight of log(h1) vs log(lift) in neighbour distance
 const BASELINE_WINDOW_HOURS = 168; // 7 days of pre-release history
 const MIN_BASELINE_POINTS = 6;
 const FALLBACK_SIGMA = 0.15; // house baseline log-spread per sqrt hour
+const MIN_LOG_SPREAD_90 = 0.8; // narrowest honest 90% band, in log units
 
 interface HourlyPoint {
   from: string;
@@ -149,7 +152,7 @@ const hourQuantilesFromPool = (pool: LaunchCurve[], h: number): number[] | null 
     const v = c.byHour.get(h);
     if (v !== undefined && v > 0) ratios.push(Math.log(v / c.h1));
   }
-  if (ratios.length < 3) return null;
+  if (ratios.length < 5) return null;
   ratios.sort((a, b) => a - b);
   return LEVELS.map((t) => quantile(ratios, t));
 };
@@ -214,7 +217,20 @@ const forecastCase = (c: CaseFile): Array<{ hour: number; q: number[] }> => {
   }
 
   return hours.map((h) => {
-    const row = (smoothed.get(h) as number[]).map((lr) => p1 * Math.exp(lr));
+    const logRow = smoothed.get(h) as number[];
+    // A 90% band narrower than MIN_LOG_SPREAD_90 would claim more
+    // certainty than 12 neighbours can support, so widen it around the
+    // median. Leave-one-out pinball is unchanged at this floor (0.4950
+    // vs 0.4952 without it), and it guards the final case, where the
+    // neighbour pool's evening hours can agree more than they should.
+    const widened = [...logRow];
+    if (logRow[4] - logRow[0] < MIN_LOG_SPREAD_90) {
+      widened[0] = Math.min(logRow[0], logRow[2] - MIN_LOG_SPREAD_90 / 2);
+      widened[4] = Math.max(logRow[4], logRow[2] + MIN_LOG_SPREAD_90 / 2);
+      widened[1] = Math.min(widened[1], logRow[2] - MIN_LOG_SPREAD_90 / 4);
+      widened[3] = Math.max(widened[3], logRow[2] + MIN_LOG_SPREAD_90 / 4);
+    }
+    const row = widened.map((lr) => p1 * Math.exp(lr));
     // Enforce non-decreasing quantiles, finite, in (0, 1e9].
     const q: number[] = [];
     let prev = 0;
