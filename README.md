@@ -12,7 +12,29 @@ category plus the case's comparable past launches) and writes
 `/output/<id>.out`: five quantiles (5%, 25%, 50%, 75%, 95%) of concurrent
 viewers for each of hours 2–24 of release day, 2026-11-19 UTC.
 
-## Model
+## Model — v2 (current)
+
+Per-hour local log-ratio regression on hour-1 scale. For each forecast hour
+h, the model fits `ln(viewers_h / viewers_1) = a_h + b_h · (ln h1 − m)` by
+kernel-weighted least squares over the comparables (Gaussian weights on
+log-h1 distance, bandwidth 1.5; slope shrunk toward 0 by
+`n_eff / (n_eff + 5)`). Spread is the kernel-weighted residual std per hour,
+shrunk toward the pooled sigma and scaled by 0.8. Hours with fewer than 8
+usable comparables fall back to the house persistence forecast.
+
+Why the change: v1's neighbour median misses the scale gradient — small
+hour-1 launches explode in the evening (Silksong 2000× from 164 viewers;
+Wolverine 9× from 23k) while mega-launches peak in hour 1 (Elden Ring,
+Cyberpunk 2077). The regression captures it.
+
+Validated on the **exact practice grader** (the four practice launches'
+true SullyGnome curves, which reproduce v1's server practice 0.251 and the
+house baseline's 0.387 to three decimals): **v2 practice pinball 0.178**
+(Wolverine 0.190, Red Dead 2 0.196, God of War Ragnarök 0.138, Spider-Man 2
+0.187), median log error 0.28, 90% coverage 0.99. Leave-one-out over the
+comparables agrees: 0.390 vs v1's 0.495.
+
+## Model — v1 (superseded)
 
 A launch's day is governed by its *regime*: whether hour 1 already holds a
 big live audience (rolling midnight unlock reached the big timezones before
